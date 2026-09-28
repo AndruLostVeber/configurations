@@ -1,7 +1,7 @@
-
 import io
 import os
 import sys
+import tempfile
 import unittest
 from contextlib import redirect_stdout
 
@@ -16,6 +16,28 @@ def run(line):
     with redirect_stdout(buffer):
         main.run_line(line)
     return buffer.getvalue()
+
+
+def run_script(text):
+    folder = tempfile.mkdtemp()
+    path = os.path.join(folder, "script.txt")
+    script = open(path, "w", encoding="utf-8")
+    script.write(text)
+    script.close()
+    buffer = io.StringIO()
+    with redirect_stdout(buffer):
+        code = main.run_script(path, "$ ")
+    return buffer.getvalue(), code
+
+
+def catch_exit(argv):
+    buffer = io.StringIO()
+    with redirect_stdout(buffer):
+        try:
+            main.parse_args(argv)
+        except SystemExit as error:
+            return buffer.getvalue(), error.code
+    return buffer.getvalue(), None
 
 
 class TestParser(unittest.TestCase):
@@ -54,6 +76,71 @@ class TestCommands(unittest.TestCase):
 
     def test_exit_bad_code(self):
         self.assertIn("нужен числовой аргумент", run("exit abc"))
+
+
+class TestSettings(unittest.TestCase):
+    def test_no_params(self):
+        settings = main.parse_args([])
+        self.assertEqual(settings, {"vfs": None, "script": None})
+
+    def test_both_params(self):
+        settings = main.parse_args(["--vfs", "vfs/minimal",
+                                    "--script", "startup/exit.txt"])
+        self.assertEqual(settings["vfs"], "vfs/minimal")
+        self.assertEqual(settings["script"], "startup/exit.txt")
+
+    def test_unknown_param(self):
+        output, code = catch_exit(["--color"])
+        self.assertIn("неизвестный параметр --color", output)
+        self.assertEqual(code, 2)
+
+    def test_param_without_value(self):
+        output, code = catch_exit(["--vfs"])
+        self.assertIn("не указано значение параметра --vfs", output)
+        self.assertEqual(code, 2)
+
+    def test_help(self):
+        output, code = catch_exit(["--help"])
+        self.assertIn("--script", output)
+        self.assertEqual(code, 0)
+
+    def test_debug_output(self):
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            main.print_settings({"vfs": "vfs/minimal", "script": None})
+        output = buffer.getvalue()
+        self.assertIn("[отладка] --vfs = vfs/minimal", output)
+        self.assertIn("[отладка] --script = не задан", output)
+
+
+class TestScript(unittest.TestCase):
+    def test_shows_input_and_output(self):
+        output, code = run_script("ls -l\n")
+        self.assertIn("$ ls -l", output)
+        self.assertIn("ls: аргументы: -l", output)
+        self.assertIsNone(code)
+
+    def test_skips_bad_lines(self):
+        output, code = run_script("hello\nls \"abc\nls\n")
+        self.assertIn("команда не найдена", output)
+        self.assertIn("не закрыта кавычка", output)
+        self.assertIn("ls: аргументов нет", output)
+
+    def test_skips_empty_lines(self):
+        output, code = run_script("\n\nls\n\n")
+        self.assertEqual(output.count("$ "), 1)
+
+    def test_exit_stops_script(self):
+        output, code = run_script("ls первый\nexit 0\nls второй\n")
+        self.assertEqual(code, 0)
+        self.assertNotIn("второй", output)
+
+    def test_missing_script(self):
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            with self.assertRaises(SystemExit):
+                main.read_script("нет_такого_файла.txt")
+        self.assertIn("не удалось прочитать скрипт", buffer.getvalue())
 
 
 if __name__ == "__main__":
