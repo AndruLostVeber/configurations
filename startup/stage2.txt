@@ -1,0 +1,8 @@
+ls -l /home
+cd $HOME
+cd
+ls "два слова"
+cd a b
+hello
+ls "abc
+exit abc
