@@ -5,11 +5,14 @@ import socket
 import sys
 
 
+vfs = {}
+
+
 def make_prompt():
     user = getpass.getuser()
     host = socket.gethostname()
     short_host = host.split(".")[0]
-    return user + "@" + short_host + ":~$ "
+    return f"{user}@{short_host}:~$ "
 
 
 def print_help():
@@ -55,6 +58,72 @@ def describe(value):
 def print_settings(settings):
     print("[отладка] --vfs = " + describe(settings["vfs"]))
     print("[отладка] --script = " + describe(settings["script"]))
+
+
+def list_folder(path):
+    try:
+        return sorted(os.listdir(path))
+    except OSError:
+        print("Ошибка загрузки VFS: не удалось открыть папку: " + path)
+        sys.exit(1)
+
+
+def read_file(path):
+    try:
+        with open(path, "rb") as source:
+            return source.read()
+    except OSError:
+        print("Ошибка загрузки VFS: не удалось прочитать файл: " + path)
+        sys.exit(1)
+
+
+def read_folder(path):
+    folder = {}
+    for name in list_folder(path):
+        full = os.path.join(path, name)
+        if os.path.isdir(full):
+            folder[name] = read_folder(full)
+        elif os.path.isfile(full):
+            folder[name] = read_file(full)
+        else:
+            print("Ошибка загрузки VFS: неверный формат: " + full)
+            sys.exit(1)
+    return folder
+
+
+def load_vfs(path):
+    if not os.path.exists(path):
+        print("Ошибка загрузки VFS: папка не найдена: " + path)
+        sys.exit(1)
+    if not os.path.isdir(path):
+        print("Ошибка загрузки VFS: это не папка: " + path)
+        sys.exit(1)
+    return read_folder(path)
+
+
+def save_folder(folder, path):
+    os.makedirs(path, exist_ok=True)
+    for name in folder:
+        full = os.path.join(path, name)
+        if isinstance(folder[name], dict):
+            save_folder(folder[name], full)
+        else:
+            with open(full, "wb") as target:
+                target.write(folder[name])
+
+
+def count_items(folder):
+    files = 0
+    folders = 0
+    for name in folder:
+        if isinstance(folder[name], dict):
+            folders = folders + 1
+            inner_files, inner_folders = count_items(folder[name])
+            files = files + inner_files
+            folders = folders + inner_folders
+        else:
+            files = files + 1
+    return files, folders
 
 
 def expand_vars(line):
@@ -106,9 +175,24 @@ def cmd_exit(args):
     if len(args) == 0:
         return 0
     if not args[0].isdigit():
-        print("exit: " + args[0] + ": нужен числовой аргумент")
+        print(f"exit: {args[0]}: нужен числовой аргумент")
         return None
     return int(args[0])
+
+
+def cmd_vfs_save(args):
+    if len(args) != 1:
+        print("использование: vfs-save ПУТЬ")
+        return
+    if len(vfs) == 0:
+        print("vfs-save: VFS не загружена")
+        return
+    try:
+        save_folder(vfs, args[0])
+    except OSError:
+        print("vfs-save: не удалось сохранить в '" + args[0] + "'")
+        return
+    print(f"VFS сохранена в {args[0]}")
 
 
 def run_command(parts):
@@ -120,6 +204,8 @@ def run_command(parts):
         print_stub("ls", args)
     elif name == "cd":
         cmd_cd(args)
+    elif name == "vfs-save":
+        cmd_vfs_save(args)
     else:
         print(name + ": команда не найдена")
     return None
@@ -139,13 +225,11 @@ def run_line(line):
 
 def read_script(path):
     try:
-        script = open(path, encoding="utf-8")
-    except OSError:
+        with open(path, encoding="utf-8") as script:
+            return script.read()
+    except (OSError, UnicodeDecodeError):
         print("Ошибка: не удалось прочитать скрипт " + path)
         sys.exit(1)
-    text = script.read()
-    script.close()
-    return text
 
 
 def run_script(path, prompt):
@@ -176,8 +260,13 @@ def repl(prompt):
 
 
 def main():
+    global vfs
     settings = parse_args(sys.argv[1:])
     print_settings(settings)
+    if settings["vfs"] is not None:
+        vfs = load_vfs(settings["vfs"])
+        files, folders = count_items(vfs)
+        print(f"[отладка] VFS загружена: папок {folders}, файлов {files}")
     prompt = make_prompt()
     if settings["script"] is not None:
         code = run_script(settings["script"], prompt)

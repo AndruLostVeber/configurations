@@ -143,5 +143,119 @@ class TestScript(unittest.TestCase):
         self.assertIn("не удалось прочитать скрипт", buffer.getvalue())
 
 
+def write_file(path, text):
+    target = open(path, "w", encoding="utf-8")
+    target.write(text)
+    target.close()
+
+
+def make_vfs_folder():
+    folder = tempfile.mkdtemp()
+    os.makedirs(os.path.join(folder, "docs", "drafts"))
+    write_file(os.path.join(folder, "readme.txt"), "привет")
+    write_file(os.path.join(folder, "docs", "report.txt"), "отчёт")
+    write_file(os.path.join(folder, "docs", "drafts", "plan.txt"), "план")
+    return folder
+
+
+class TestVfs(unittest.TestCase):
+    def test_load_minimal(self):
+        folder = tempfile.mkdtemp()
+        write_file(os.path.join(folder, "hello.txt"), "привет")
+        loaded = main.load_vfs(folder)
+        self.assertEqual(loaded, {"hello.txt": "привет".encode("utf-8")})
+
+    def test_load_deep(self):
+        loaded = main.load_vfs(make_vfs_folder())
+        self.assertIn("readme.txt", loaded)
+        self.assertIn("plan.txt", loaded["docs"]["drafts"])
+
+    def test_count_items(self):
+        files, folders = main.count_items(main.load_vfs(make_vfs_folder()))
+        self.assertEqual(files, 3)
+        self.assertEqual(folders, 2)
+
+    def test_load_missing_folder(self):
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            with self.assertRaises(SystemExit):
+                main.load_vfs("нет_такой_папки")
+        self.assertIn("папка не найдена", buffer.getvalue())
+
+    def test_load_file_instead_of_folder(self):
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "hello.txt")
+        write_file(path, "привет")
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            with self.assertRaises(SystemExit):
+                main.load_vfs(path)
+        self.assertIn("это не папка", buffer.getvalue())
+
+    def test_save_and_load_back(self):
+        source = make_vfs_folder()
+        loaded = main.load_vfs(source)
+        copy = os.path.join(tempfile.mkdtemp(), "копия")
+        main.save_folder(loaded, copy)
+        self.assertEqual(main.load_vfs(copy), loaded)
+
+    def test_source_not_changed(self):
+        source = make_vfs_folder()
+        before = main.load_vfs(source)
+        main.save_folder(before, os.path.join(tempfile.mkdtemp(), "копия"))
+        self.assertEqual(main.load_vfs(source), before)
+
+    def test_load_unreadable_file(self):
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "secret.txt")
+        write_file(path, "секрет")
+        os.chmod(path, 0)
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            with self.assertRaises(SystemExit):
+                main.load_vfs(folder)
+        os.chmod(path, 0o644)
+        self.assertIn("не удалось прочитать файл", buffer.getvalue())
+
+    def test_load_strange_file(self):
+        folder = tempfile.mkdtemp()
+        os.symlink("нет_такого_файла", os.path.join(folder, "ссылка"))
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            with self.assertRaises(SystemExit):
+                main.load_vfs(folder)
+        self.assertIn("неверный формат", buffer.getvalue())
+
+    def test_script_in_other_encoding(self):
+        folder = tempfile.mkdtemp()
+        path = os.path.join(folder, "script.txt")
+        with open(path, "wb") as target:
+            target.write("ls привет\n".encode("cp1251"))
+        buffer = io.StringIO()
+        with redirect_stdout(buffer):
+            with self.assertRaises(SystemExit):
+                main.read_script(path)
+        self.assertIn("не удалось прочитать скрипт", buffer.getvalue())
+
+    def test_vfs_save_without_vfs(self):
+        main.vfs = {}
+        output = run("vfs-save " + os.path.join(tempfile.mkdtemp(), "копия"))
+        self.assertIn("VFS не загружена", output)
+
+    def test_vfs_save_without_path(self):
+        self.assertIn("использование: vfs-save ПУТЬ", run("vfs-save"))
+
+    def test_vfs_save_message(self):
+        main.vfs = {"hello.txt": "привет".encode("utf-8")}
+        copy = os.path.join(tempfile.mkdtemp(), "копия")
+        self.assertIn("VFS сохранена", run("vfs-save " + copy))
+        self.assertEqual(main.load_vfs(copy), main.vfs)
+
+    def test_vfs_save_bad_path(self):
+        main.vfs = {"hello.txt": "привет".encode("utf-8")}
+        output = run("vfs-save /нельзя/сюда/писать")
+        self.assertIn("не удалось сохранить", output)
+
+
 if __name__ == "__main__":
     unittest.main()

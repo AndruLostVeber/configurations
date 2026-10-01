@@ -1,6 +1,8 @@
 #!/bin/sh
 cd "$(dirname "$0")/.." || exit 1
 
+./run.sh -h
+
 echo "=== стартовый скрипт без --vfs ==="
 ./run.sh --script startup/stage2.txt < /dev/null
 

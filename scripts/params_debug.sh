@@ -1,6 +1,9 @@
 #!/bin/sh
 cd "$(dirname "$0")/.." || exit 1
 
+echo "=== справка по параметрам ==="
+./run.sh --help
+
 echo "=== без параметров ==="
 ./run.sh < /dev/null
 

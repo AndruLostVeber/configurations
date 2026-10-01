@@ -1,7 +1,11 @@
+ls
 ls -l /home
 cd $HOME
 cd
 ls "два слова"
+vfs-save out/startup_copy
+vfs-save
+vfs-save a b
 cd a b
 hello
 ls "abc
