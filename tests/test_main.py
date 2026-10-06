@@ -2,6 +2,7 @@ import io
 import os
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import redirect_stdout
 
@@ -26,7 +27,7 @@ def run_script(text):
     script.close()
     buffer = io.StringIO()
     with redirect_stdout(buffer):
-        code = main.run_script(path, "$ ")
+        code = main.run_script(path)
     return buffer.getvalue(), code
 
 
@@ -59,12 +60,6 @@ class TestParser(unittest.TestCase):
 
 
 class TestCommands(unittest.TestCase):
-    def test_ls_args(self):
-        self.assertIn("ls: аргументы: -l /home", run("ls -l /home"))
-
-    def test_cd_without_args(self):
-        self.assertIn("cd: аргументов нет", run("cd"))
-
     def test_cd_too_many_args(self):
         self.assertIn("слишком много аргументов", run("cd a b"))
 
@@ -114,24 +109,28 @@ class TestSettings(unittest.TestCase):
 
 
 class TestScript(unittest.TestCase):
+    def setUp(self):
+        main.vfs = {"readme.txt": b"hi"}
+        main.current_dir = []
+
     def test_shows_input_and_output(self):
         output, code = run_script("ls -l\n")
         self.assertIn("$ ls -l", output)
-        self.assertIn("ls: аргументы: -l", output)
+        self.assertIn("readme.txt", output)
         self.assertIsNone(code)
 
     def test_skips_bad_lines(self):
         output, code = run_script("hello\nls \"abc\nls\n")
         self.assertIn("команда не найдена", output)
         self.assertIn("не закрыта кавычка", output)
-        self.assertIn("ls: аргументов нет", output)
+        self.assertIn("readme.txt", output)
 
     def test_skips_empty_lines(self):
         output, code = run_script("\n\nls\n\n")
         self.assertEqual(output.count("$ "), 1)
 
     def test_exit_stops_script(self):
-        output, code = run_script("ls первый\nexit 0\nls второй\n")
+        output, code = run_script("cd первый\nexit 0\ncd второй\n")
         self.assertEqual(code, 0)
         self.assertNotIn("второй", output)
 
@@ -255,6 +254,237 @@ class TestVfs(unittest.TestCase):
         main.vfs = {"hello.txt": "привет".encode("utf-8")}
         output = run("vfs-save /нельзя/сюда/писать")
         self.assertIn("не удалось сохранить", output)
+
+
+def make_test_vfs():
+    main.vfs = {
+        "readme.txt": b"hello",
+        "etc": {"hosts": b"127.0.0.1"},
+        "home": {
+            "user": {
+                "docs": {"report.txt": b"report"},
+                "music": {},
+            },
+        },
+    }
+    main.current_dir = []
+
+
+class TestPath(unittest.TestCase):
+    def setUp(self):
+        make_test_vfs()
+
+    def test_relative(self):
+        self.assertEqual(main.split_path("home/user"), ["home", "user"])
+
+    def test_absolute(self):
+        main.current_dir = ["home"]
+        self.assertEqual(main.split_path("/etc"), ["etc"])
+
+    def test_dots(self):
+        main.current_dir = ["home", "user"]
+        self.assertEqual(main.split_path("../user/./docs"),
+                         ["home", "user", "docs"])
+
+    def test_up_from_root(self):
+        self.assertEqual(main.split_path("../.."), [])
+
+    def test_tilde(self):
+        main.current_dir = ["home"]
+        self.assertEqual(main.split_path("~/etc"), ["etc"])
+
+    def test_find_missing(self):
+        self.assertIsNone(main.find_node(["readme.txt", "x"]))
+
+
+class TestLs(unittest.TestCase):
+    def setUp(self):
+        make_test_vfs()
+        main.vfs[".profile"] = b"secret"
+        main.vfs["big.bin"] = b"x" * 2048
+
+    def test_root(self):
+        self.assertEqual(run("ls"), "big.bin  etc  home  readme.txt\n")
+
+    def test_path(self):
+        self.assertEqual(run("ls home/user"), "docs  music\n")
+
+    def test_empty_folder(self):
+        self.assertEqual(run("ls home/user/music"), "")
+
+    def test_file(self):
+        self.assertEqual(run("ls /etc/hosts"), "/etc/hosts\n")
+
+    def test_long(self):
+        output = run("ls -l")
+        self.assertIn("d      1 etc", output)
+        self.assertIn("-      5 readme.txt", output)
+
+    def test_missing(self):
+        output = run("ls нет")
+        self.assertIn("ls: нет: нет такого файла или папки", output)
+
+    def test_hidden_not_shown(self):
+        self.assertNotIn(".profile", run("ls"))
+        self.assertNotIn(".profile", run("ls -l"))
+
+    def test_all(self):
+        output = run("ls -a")
+        self.assertEqual(output, ".  ..  .profile  big.bin  etc  home  readme.txt\n")
+
+    def test_all_in_folder(self):
+        self.assertEqual(run("ls -a home"), ".  ..  user\n")
+
+    def test_long_size_in_bytes(self):
+        self.assertIn("-   2048 big.bin", run("ls -l"))
+
+    def test_human(self):
+        output = run("ls -lh")
+        self.assertIn("-   2.0K big.bin", output)
+        self.assertIn("-      5 readme.txt", output)
+
+    def test_human_without_long(self):
+        self.assertEqual(run("ls -h"), run("ls"))
+
+    def test_long_all(self):
+        output = run("ls -la home")
+        self.assertIn("d      1 .", output)
+        self.assertIn("d      5 ..", output)
+        self.assertIn("d      2 user", output)
+
+    def test_keys_in_any_order(self):
+        expected = run("ls -lha")
+        self.assertIn("-   2.0K big.bin", expected)
+        self.assertIn("-      6 .profile", expected)
+        self.assertEqual(run("ls -hal"), expected)
+        self.assertEqual(run("ls -l -h -a"), expected)
+        self.assertEqual(run("ls -a -lh"), expected)
+
+    def test_keys_after_path(self):
+        self.assertEqual(run("ls etc -l"), run("ls -l etc"))
+
+    def test_human_on_file(self):
+        self.assertEqual(run("ls -lh big.bin"), "-   2.0K big.bin\n")
+
+    def test_human_size(self):
+        self.assertEqual(main.human_size(0), "0")
+        self.assertEqual(main.human_size(1023), "1023")
+        self.assertEqual(main.human_size(1536), "1.5K")
+        self.assertEqual(main.human_size(20 * 1024), "20K")
+        self.assertEqual(main.human_size(3 * 1024 * 1024), "3.0M")
+
+    def test_bad_key(self):
+        self.assertIn("ls: неверный ключ -x", run("ls -x"))
+
+    def test_bad_key_in_group(self):
+        output = run("ls -lax")
+        self.assertEqual(output, "ls: неверный ключ -x\n")
+
+    def test_too_many_args(self):
+        self.assertIn("слишком много аргументов", run("ls etc home"))
+
+
+class TestCd(unittest.TestCase):
+    def setUp(self):
+        make_test_vfs()
+
+    def test_go_down_and_up(self):
+        run("cd home/user/docs")
+        self.assertEqual(main.current_dir, ["home", "user", "docs"])
+        run("cd ..")
+        self.assertEqual(main.current_dir, ["home", "user"])
+
+    def test_without_args(self):
+        main.current_dir = ["home", "user"]
+        run("cd")
+        self.assertEqual(main.current_dir, [])
+
+    def test_prompt(self):
+        run("cd home/user")
+        self.assertTrue(main.make_prompt().endswith(":~/home/user$ "))
+
+    def test_ls_after_cd(self):
+        run("cd home")
+        self.assertEqual(run("ls"), "user\n")
+
+    def test_missing(self):
+        output = run("cd нет")
+        self.assertIn("cd: нет: нет такого файла или папки", output)
+        self.assertEqual(main.current_dir, [])
+
+    def test_file(self):
+        self.assertIn("cd: readme.txt: это не папка", run("cd readme.txt"))
+
+
+class TestTree(unittest.TestCase):
+    def setUp(self):
+        make_test_vfs()
+
+    def test_folder(self):
+        output = run("tree home")
+        expected = ("home\n"
+                    "└── user\n"
+                    "    ├── docs\n"
+                    "    │   └── report.txt\n"
+                    "    └── music\n"
+                    "\n"
+                    "папок 3, файлов 1\n")
+        self.assertEqual(output, expected)
+
+    def test_current(self):
+        output = run("tree")
+        self.assertTrue(output.startswith(".\n"))
+        self.assertIn("├── etc", output)
+        self.assertIn("└── readme.txt", output)
+        self.assertIn("папок 5, файлов 3", output)
+
+    def test_file(self):
+        self.assertIn("это не папка", run("tree readme.txt"))
+
+    def test_missing(self):
+        self.assertIn("нет такого файла или папки", run("tree нет"))
+
+    def test_too_many_args(self):
+        self.assertIn("слишком много аргументов", run("tree a b"))
+
+
+class TestDate(unittest.TestCase):
+    def test_default(self):
+        output = run("date")
+        year = str(time.localtime().tm_year)
+        self.assertIn(year, output)
+
+    def test_format(self):
+        expected = time.strftime("%Y") + "\n"
+        self.assertEqual(run("date +%Y"), expected)
+
+    def test_bad_format(self):
+        self.assertIn("date: неверный формат 'abc'", run("date abc"))
+
+    def test_too_many_args(self):
+        self.assertIn("слишком много аргументов", run("date a b"))
+
+
+class TestCal(unittest.TestCase):
+    def test_month(self):
+        lines = run("cal 2 2024").split("\n")
+        self.assertEqual(lines[0].strip(), "Февраль 2024")
+        self.assertEqual(lines[1], "Пн Вт Ср Чт Пт Сб Вс")
+        self.assertEqual(lines[2], "          1  2  3  4")
+        self.assertEqual(lines[6], "26 27 28 29")
+
+    def test_current(self):
+        month = main.MONTHS[time.localtime().tm_mon - 1]
+        self.assertIn(month, run("cal"))
+
+    def test_bad_month(self):
+        self.assertIn("cal: 13: неверный месяц", run("cal 13 2026"))
+
+    def test_bad_year(self):
+        self.assertIn("cal: abc: неверный год", run("cal 1 abc"))
+
+    def test_wrong_args(self):
+        self.assertIn("использование: cal", run("cal 2026"))
 
 
 if __name__ == "__main__":
