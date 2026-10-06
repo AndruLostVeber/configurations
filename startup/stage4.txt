@@ -1,0 +1,48 @@
+ls
+ls -l
+ls home/user
+ls /etc/hosts
+ls -l readme.txt
+ls нет_такой_папки
+ls -a
+ls -x
+ls -lax
+ls etc home
+cd home/user
+ls
+ls -a
+ls -l music
+ls -h music
+ls -lh music
+ls -la
+ls -lha music
+ls -hal music
+ls -l -h -a music
+ls -lh music/playlist.txt
+cd docs/drafts
+ls -l
+cd ..
+cd ../music
+ls ..
+cd /
+cd ~/home
+cd
+cd readme.txt
+cd нет_такой_папки
+cd a b
+tree
+tree home/user
+tree readme.txt
+tree нет_такой_папки
+tree a b
+date
+date +%d.%m.%Y
+date +%H:%M
+date abc
+date a b
+cal
+cal 2 2024
+cal 13 2026
+cal 1 abc
+cal 2026
+exit
