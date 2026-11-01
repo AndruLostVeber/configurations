@@ -1,0 +1,6 @@
+package: Microsoft.Bcl.AsyncInterfaces
+repository: https://api.nuget.org/v3/index.json
+test_mode: false
+version: "8.0.0"
+output_file: graph.svg
+ascii_tree: false
