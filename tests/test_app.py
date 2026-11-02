@@ -3,7 +3,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Thread
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "src" / "main.py"
@@ -59,3 +61,38 @@ class AppTests(unittest.TestCase):
                 self.settings[key] = old
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(key, result.stderr)
+
+    def test_nuget(self):
+        def handler(*args):
+            return SimpleHTTPRequestHandler(*args, directory=self.folder)
+
+        with ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                self.check_nuget(server.server_port)
+            finally:
+                server.shutdown()
+                thread.join()
+
+    def check_nuget(self, port):
+        base = f"http://127.0.0.1:{port}"
+        files = {
+            "index.json": json.dumps({"resources": [{
+                "@type": "PackageBaseAddress/3.0.0", "@id": base + "/flat/",
+            }]}),
+            "flat/a/2.0.0/a.nuspec": """<package xmlns="urn:nuget">
+                <metadata><dependencies><group targetFramework="net8.0">
+                    <dependency id="B" version="[1.0,2.0)" />
+                </group></dependencies></metadata></package>""",
+        }
+        for name, content in files.items():
+            path = self.folder / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(content, encoding="utf-8")
+        self.settings.update(
+            repository=base + "/index.json", test_mode=False, version="2.0",
+        )
+        result = self.run_stage(2)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "B [1.0,2.0)")
