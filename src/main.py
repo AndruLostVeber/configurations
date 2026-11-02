@@ -1,12 +1,15 @@
 import argparse
 import re
 import sys
+import xml.etree.ElementTree as element_tree
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import yaml
 
-from nuget import PACKAGE_ID, VERSION
+from nuget import (
+    PACKAGE_ID, VERSION, direct_dependencies, normalize_version, package_base
+)
 
 
 TEST_PACKAGE = r"[A-Z]"
@@ -64,19 +67,35 @@ def repository_path(config, folder):
     raise ValueError("repository: укажите URL индекса NuGet")
 
 
+def run_nuget(config, repository):
+    base = package_base(repository)
+    name = config["package"].lower()
+    version = normalize_version(config["version"])
+
+    dependencies = direct_dependencies(base, name, version)
+    for package, requirement in dependencies:
+        print(f"{package} {requirement}".strip())
+    if not dependencies:
+        print("Прямых зависимостей нет")
+
 def run(stage, config_path):
     config = read_config(config_path)
-    repository_path(config, config_path.parent)
-    for key in ("package", "repository", "test_mode", "version",
-                "output_file", "ascii_tree"):
-        print(f"{key}: {config[key]}")
+    repository = repository_path(config, config_path.parent)
+    if stage == 1:
+        for key in ("package", "repository", "test_mode", "version",
+                    "output_file", "ascii_tree"):
+            print(f"{key}: {config[key]}")
+    elif config["test_mode"]:
+        raise ValueError("test_mode: для этапа 2 укажите false")
+    else:
+        run_nuget(config, repository)
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Зависимости NuGet, вариант 21"
     )
-    parser.add_argument("stage", type=int, choices=(1,))
+    parser.add_argument("stage", type=int, choices=(1, 2))
     default_config = Path(__file__).resolve().parents[1] / "config.yml"
     parser.add_argument("config", type=Path, nargs="?", default=default_config)
     args = parser.parse_args()
@@ -84,7 +103,7 @@ def main():
     try:
         run(args.stage, args.config)
     except (
-        OSError, ValueError, KeyError, yaml.YAMLError
+        OSError, ValueError, KeyError, element_tree.ParseError, yaml.YAMLError
     ) as error:
         print(f"Ошибка: {error}", file=sys.stderr)
         return 1
