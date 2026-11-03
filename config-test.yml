@@ -1,0 +1,6 @@
+package: A
+repository: tests/repository.yml
+test_mode: true
+version: "1.0.0"
+output_file: graph.svg
+ascii_tree: false

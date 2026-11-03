@@ -17,7 +17,7 @@ class AppTests(unittest.TestCase):
         self.addCleanup(folder.cleanup)
         self.folder = Path(folder.name)
         (self.folder / "repo.yml").write_text(
-            "A: []\n",
+            (ROOT / "tests" / "repository.yml").read_text(encoding="utf-8"),
             encoding="utf-8",
         )
         self.settings = {
@@ -62,6 +62,25 @@ class AppTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn(key, result.stderr)
 
+    def test_bfs_with_cycle_and_shared_dependency(self):
+        result = self.run_stage(3)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [
+            "A: B, C", "B: D", "C: D", "D: A",
+        ])
+
+    def test_package_without_dependencies(self):
+        self.settings["package"] = "E"
+        result = self.run_stage(3)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "E: —")
+
+    def test_missing_package(self):
+        self.settings["package"] = "Z"
+        result = self.run_stage(3)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Z", result.stderr)
+
     def test_nuget(self):
         def handler(*args):
             return SimpleHTTPRequestHandler(*args, directory=self.folder)
@@ -85,6 +104,11 @@ class AppTests(unittest.TestCase):
                 <metadata><dependencies><group targetFramework="net8.0">
                     <dependency id="B" version="[1.0,2.0)" />
                 </group></dependencies></metadata></package>""",
+            "flat/b/index.json": '{"versions": ["1.1.0", "2.0.0"]}',
+            "flat/b/1.1.0/b.nuspec": """<package>
+                <metadata><dependencies>
+                    <dependency id="A" version="[2.0]" />
+                </dependencies></metadata></package>""",
         }
         for name, content in files.items():
             path = self.folder / name
@@ -96,3 +120,8 @@ class AppTests(unittest.TestCase):
         result = self.run_stage(2)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.strip(), "B [1.0,2.0)")
+        result = self.run_stage(3)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [
+            "a@2.0.0: b@1.1.0", "b@1.1.0: a@2.0.0",
+        ])

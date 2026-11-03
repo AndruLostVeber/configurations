@@ -8,11 +8,17 @@ from urllib.parse import urlsplit
 import yaml
 
 from nuget import (
-    PACKAGE_ID, VERSION, direct_dependencies, normalize_version, package_base
+    PACKAGE_ID,
+    VERSION,
+    dependency_version,
+    direct_dependencies,
+    normalize_version,
+    package_base,
 )
 
 
 TEST_PACKAGE = r"[A-Z]"
+DIRECT_STAGE = 2
 
 
 def read_yaml(path):
@@ -67,16 +73,71 @@ def repository_path(config, folder):
     raise ValueError("repository: укажите URL индекса NuGet")
 
 
-def run_nuget(config, repository):
+def read_test_repository(path):
+    data = read_yaml(path)
+    if not isinstance(data, dict):
+        raise ValueError("repository: нужен словарь пакетов и зависимостей")
+    for name, dependencies in data.items():
+        if not isinstance(name, str) or not re.fullmatch(TEST_PACKAGE, name):
+            raise ValueError(f"repository: неверное имя пакета {name}")
+        if not isinstance(dependencies, list):
+            raise ValueError(f"repository: зависимости {name} задаются списком")
+        for dependency in dependencies:
+            if not isinstance(dependency, str) or dependency not in data:
+                raise ValueError(f"repository: пакет {dependency} не описан")
+    return data
+
+
+def bfs(level, graph, get_dependencies):
+    if not level:
+        return graph
+
+    next_level = []
+    for package in level:
+        if package in graph:
+            continue
+        graph[package] = get_dependencies(package)
+        for dependency in graph[package]:
+            if dependency not in graph:
+                next_level.append(dependency)
+    return bfs(next_level, graph, get_dependencies)
+
+
+def print_graph(graph):
+    for name, dependencies in graph.items():
+        print(f"{name}: {', '.join(dependencies) or '—'}")
+
+
+def run_nuget(stage, config, repository):
     base = package_base(repository)
     name = config["package"].lower()
     version = normalize_version(config["version"])
 
-    dependencies = direct_dependencies(base, name, version)
-    for package, requirement in dependencies:
-        print(f"{package} {requirement}".strip())
-    if not dependencies:
-        print("Прямых зависимостей нет")
+    if stage == DIRECT_STAGE:
+        dependencies = direct_dependencies(base, name, version)
+        for package, requirement in dependencies:
+            print(f"{package} {requirement}".strip())
+        if not dependencies:
+            print("Прямых зависимостей нет")
+        return
+
+    versions = {}
+
+    def get_dependencies(node):
+        package, version = node.split("@")
+        result = []
+        for name, requirement in direct_dependencies(base, package, version):
+            name = name.lower()
+            key = (name, requirement)
+            if key not in versions:
+                versions[key] = dependency_version(base, name, requirement)
+            dependency = f"{name}@{versions[key]}"
+            if dependency not in result:
+                result.append(dependency)
+        return result
+
+    print_graph(bfs([f"{name}@{version}"], {}, get_dependencies))
+
 
 def run(stage, config_path):
     config = read_config(config_path)
@@ -86,16 +147,22 @@ def run(stage, config_path):
                     "output_file", "ascii_tree"):
             print(f"{key}: {config[key]}")
     elif config["test_mode"]:
-        raise ValueError("test_mode: для этапа 2 укажите false")
+        if stage == DIRECT_STAGE:
+            raise ValueError("test_mode: для этапа 2 укажите false")
+        data = read_test_repository(repository)
+        name = config["package"]
+        if name not in data:
+            raise ValueError(f"Пакет {name} не найден")
+        print_graph(bfs([name], {}, data.__getitem__))
     else:
-        run_nuget(config, repository)
+        run_nuget(stage, config, repository)
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Зависимости NuGet, вариант 21"
     )
-    parser.add_argument("stage", type=int, choices=(1, 2))
+    parser.add_argument("stage", type=int, choices=(1, DIRECT_STAGE, 3))
     default_config = Path(__file__).resolve().parents[1] / "config.yml"
     parser.add_argument("config", type=Path, nargs="?", default=default_config)
     args = parser.parse_args()
