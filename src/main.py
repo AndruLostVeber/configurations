@@ -18,7 +18,11 @@ from nuget import (
 
 
 TEST_PACKAGE = r"[A-Z]"
+CONFIG_STAGE = 1
 DIRECT_STAGE = 2
+GRAPH_STAGE = 3
+ORDER_STAGE = 4
+STAGES = (CONFIG_STAGE, DIRECT_STAGE, GRAPH_STAGE, ORDER_STAGE)
 
 
 def read_yaml(path):
@@ -108,19 +112,45 @@ def print_graph(graph):
         print(f"{name}: {', '.join(dependencies) or '—'}")
 
 
-def run_nuget(stage, config, repository):
+def load_order(graph, order):
+    loaded = set(order)
+    ready = [
+        package for package, dependencies in graph.items()
+        if package not in loaded and loaded.issuperset(dependencies)
+    ]
+    if ready:
+        return load_order(graph, order + ready)
+    rest = [package for package in graph if package not in loaded]
+    if rest:
+        raise ValueError(
+            "Цикл зависимостей, порядок загрузки не определён для: "
+            + ", ".join(rest)
+        )
+    return order
+
+
+def print_order(graph):
+    for number, package in enumerate(load_order(graph, []), 1):
+        print(f"{number}. {package}")
+
+
+def print_direct(config, repository):
+    if config["test_mode"]:
+        raise ValueError("test_mode: для этапа 2 укажите false")
     base = package_base(repository)
     name = config["package"].lower()
     version = normalize_version(config["version"])
+    dependencies = direct_dependencies(base, name, version)
+    for package, requirement in dependencies:
+        print(f"{package} {requirement}".strip())
+    if not dependencies:
+        print("Прямых зависимостей нет")
 
-    if stage == DIRECT_STAGE:
-        dependencies = direct_dependencies(base, name, version)
-        for package, requirement in dependencies:
-            print(f"{package} {requirement}".strip())
-        if not dependencies:
-            print("Прямых зависимостей нет")
-        return
 
+def nuget_graph(config, repository):
+    base = package_base(repository)
+    name = config["package"].lower()
+    version = normalize_version(config["version"])
     versions = {}
 
     def get_dependencies(node):
@@ -136,33 +166,44 @@ def run_nuget(stage, config, repository):
                 result.append(dependency)
         return result
 
-    print_graph(bfs([f"{name}@{version}"], {}, get_dependencies))
+    return bfs([f"{name}@{version}"], {}, get_dependencies)
+
+
+def local_graph(config, repository):
+    data = read_test_repository(repository)
+    name = config["package"]
+    if name not in data:
+        raise ValueError(f"Пакет {name} не найден")
+    return bfs([name], {}, data.__getitem__)
 
 
 def run(stage, config_path):
     config = read_config(config_path)
     repository = repository_path(config, config_path.parent)
-    if stage == 1:
+    if stage == CONFIG_STAGE:
         for key in ("package", "repository", "test_mode", "version",
                     "output_file", "ascii_tree"):
             print(f"{key}: {config[key]}")
-    elif config["test_mode"]:
-        if stage == DIRECT_STAGE:
-            raise ValueError("test_mode: для этапа 2 укажите false")
-        data = read_test_repository(repository)
-        name = config["package"]
-        if name not in data:
-            raise ValueError(f"Пакет {name} не найден")
-        print_graph(bfs([name], {}, data.__getitem__))
+        return
+    if stage == DIRECT_STAGE:
+        print_direct(config, repository)
+        return
+
+    if config["test_mode"]:
+        graph = local_graph(config, repository)
     else:
-        run_nuget(stage, config, repository)
+        graph = nuget_graph(config, repository)
+    if stage == GRAPH_STAGE:
+        print_graph(graph)
+    else:
+        print_order(graph)
 
 
 def main():
     parser = argparse.ArgumentParser(
         description="Зависимости NuGet, вариант 21"
     )
-    parser.add_argument("stage", type=int, choices=(1, DIRECT_STAGE, 3))
+    parser.add_argument("stage", type=int, choices=STAGES)
     default_config = Path(__file__).resolve().parents[1] / "config.yml"
     parser.add_argument("config", type=Path, nargs="?", default=default_config)
     args = parser.parse_args()

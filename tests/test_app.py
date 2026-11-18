@@ -81,6 +81,25 @@ class AppTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Z", result.stderr)
 
+    def test_load_order(self):
+        cases = {
+            "F": ["1. I", "2. G", "3. J", "4. H", "5. F"],
+            "E": ["1. E"],
+        }
+        for package, order in cases.items():
+            with self.subTest(package=package):
+                self.settings["package"] = package
+                result = self.run_stage(4)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout.splitlines(), order)
+
+    def test_load_order_with_cycle(self):
+        result = self.run_stage(4)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+        self.assertIn("Цикл зависимостей", result.stderr)
+        self.assertIn("A, B, C, D", result.stderr)
+
     def test_nuget(self):
         def handler(*args):
             return SimpleHTTPRequestHandler(*args, directory=self.folder)
