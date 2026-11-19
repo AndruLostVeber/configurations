@@ -15,6 +15,7 @@ from nuget import (
     normalize_version,
     package_base,
 )
+from visual import ascii_tree, mermaid, svg
 
 
 TEST_PACKAGE = r"[A-Z]"
@@ -22,7 +23,8 @@ CONFIG_STAGE = 1
 DIRECT_STAGE = 2
 GRAPH_STAGE = 3
 ORDER_STAGE = 4
-STAGES = (CONFIG_STAGE, DIRECT_STAGE, GRAPH_STAGE, ORDER_STAGE)
+VISUAL_STAGE = 5
+STAGES = (CONFIG_STAGE, DIRECT_STAGE, GRAPH_STAGE, ORDER_STAGE, VISUAL_STAGE)
 
 
 def read_yaml(path):
@@ -134,6 +136,17 @@ def print_order(graph):
         print(f"{number}. {package}")
 
 
+def print_visual(graph, config, folder):
+    root = next(iter(graph))
+    print(mermaid(graph))
+    if config["ascii_tree"]:
+        print()
+        print(ascii_tree(graph, root))
+    path = folder / config["output_file"]
+    path.write_text(svg(graph, root), encoding="utf-8")
+    print(f"\nSVG сохранён в {path}")
+
+
 def print_direct(config, repository):
     if config["test_mode"]:
         raise ValueError("test_mode: для этапа 2 укажите false")
@@ -195,8 +208,10 @@ def run(stage, config_path):
         graph = nuget_graph(config, repository)
     if stage == GRAPH_STAGE:
         print_graph(graph)
-    else:
+    elif stage == ORDER_STAGE:
         print_order(graph)
+    else:
+        print_visual(graph, config, config_path.parent)
 
 
 def main():

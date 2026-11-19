@@ -3,12 +3,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as element_tree
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
 
 ROOT = Path(__file__).resolve().parents[1]
 APP = ROOT / "src" / "main.py"
+SVG = "{http://www.w3.org/2000/svg}"
 
 
 class AppTests(unittest.TestCase):
@@ -99,6 +101,43 @@ class AppTests(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertIn("Цикл зависимостей", result.stderr)
         self.assertIn("A, B, C, D", result.stderr)
+
+    def test_mermaid_and_svg(self):
+        result = self.run_stage(5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        image = self.folder / "graph.svg"
+        self.assertEqual(result.stdout.splitlines(), [
+            "graph TD",
+            '    n1["A"]', '    n2["B"]', '    n3["C"]', '    n4["D"]',
+            "    n1 --> n2", "    n1 --> n3", "    n2 --> n4",
+            "    n3 --> n4", "    n4 --> n1",
+            "", f"SVG сохранён в {image}",
+        ])
+        root = element_tree.parse(image).getroot()
+        names = [node.text for node in root.iter(SVG + "text")]
+        self.assertEqual(names, ["A", "B", "C", "D"])
+        edges = root.findall(SVG + "path[@marker-end]")
+        self.assertEqual(len(edges), len(names) + 1)
+
+    def test_ascii_tree(self):
+        self.settings.update(package="F", ascii_tree=True)
+        result = self.run_stage(5)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        tree = result.stdout.split("\n\n")[1]
+        self.assertEqual(tree.splitlines(), [
+            "F",
+            "├── G",
+            "│   └── I",
+            "└── H",
+            "    ├── I (*)",
+            "    └── J",
+            "        └── I (*)",
+        ])
+        self.assertTrue((self.folder / "graph.svg").is_file())
+        self.settings["package"] = "A"
+        result = self.run_stage(5)
+        self.assertIn("│       └── A (цикл)", result.stdout)
+        self.assertIn("    └── D (*)", result.stdout)
 
     def test_nuget(self):
         def handler(*args):
