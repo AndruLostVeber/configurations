@@ -24,24 +24,50 @@ def run_cli(*args):
 class AssemblerTests(unittest.TestCase):
     """Проверяет примеры спецификации и диагностику разбора."""
 
-    def test_specification_fields(self):
+    def test_specification_bytes(self):
         with TemporaryDirectory() as directory:
-            result = run_cli(
-                "assemble", SPECIFICATION, Path(directory) / "out.bin",
-                "--test",
+            binary = Path(directory) / "out.bin"
+            result = run_cli("assemble", SPECIFICATION, binary, "--test")
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.splitlines(),
+                [
+                    "0xA9, 0xC9, 0x00, 0x00, 0x00",
+                    "0xFC, 0x5C, 0x03, 0x00, 0x00",
+                    "0x7A, 0x2F, 0x01, 0x00, 0x00",
+                    "0xCE, 0x0F, 0x00, 0x00, 0x00",
+                    "Ассемблировано команд: 4",
+                ],
+            )
+            self.assertEqual(
+                binary.read_bytes(),
+                bytes.fromhex("a9c9000000 fc5c030000 7a2f010000 ce0f000000"),
             )
 
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            result.stdout.splitlines(),
-            [
-                "(A=9, B=10, C=201)",
-                "(A=12, B=15, C=860)",
-                "(A=10, B=7, C=15, D=9)",
-                "(A=14, B=12, C=15)",
-                "Ассемблировано команд: 4",
-            ],
-        )
+    def test_field_boundaries_without_test_mode(self):
+        commands = [
+            "load r0, -8388608",
+            "load r15, 8388607",
+            "load r1, -1",
+            "read r15, 0xffffffff",
+            "write r15, 31, r15",
+            "sgn r15, r15",
+        ]
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "bounds.asm"
+            binary = Path(directory) / "out.bin"
+            source.write_text("\n".join(commands), encoding="utf-8")
+            result = run_cli("assemble", source, binary)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "Ассемблировано команд: 6")
+            self.assertEqual(
+                binary.read_bytes(),
+                bytes.fromhex(
+                    "0900008000 f9ffff7f00 19ffffff00 "
+                    "fcffffffff faff010000 fe0f000000"
+                ),
+            )
 
     def test_invalid_instruction_has_line_number(self):
         cases = {

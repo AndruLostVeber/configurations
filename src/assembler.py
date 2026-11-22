@@ -1,4 +1,4 @@
-"""Разбор текстовых команд и вывод промежуточного представления."""
+"""Разбор текстовых команд в промежуточное представление."""
 
 import re
 
@@ -56,12 +56,3 @@ def assemble(source: str) -> list[Instruction]:
         except ValueError as error:
             raise ValueError(f"Строка {number}: {error}") from error
     return instructions
-
-
-def format_fields(instruction: Instruction) -> str:
-    """Форматирует поля команды по образцу из спецификации."""
-    values = (instruction.opcode, *instruction.operands)
-    fields = ", ".join(
-        f"{name}={value}" for name, value in zip("ABCD", values)
-    )
-    return f"({fields})"
