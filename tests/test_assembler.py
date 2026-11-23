@@ -1,24 +1,12 @@
 """Проверки ассемблера через команды запуска."""
 
-import subprocess
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from tests import PROJECT, run_cli
 
-PROJECT = Path(__file__).resolve().parents[1]
 SPECIFICATION = PROJECT / "examples" / "specification.asm"
-
-
-def run_cli(*args):
-    """Запускает CLI так же, как при использовании проекта."""
-    return subprocess.run(
-        [str(PROJECT / "run.sh"), *map(str, args)],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
 
 
 class AssemblerTests(unittest.TestCase):

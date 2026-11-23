@@ -6,6 +6,7 @@ from pathlib import Path
 
 from src.assembler import assemble
 from src.isa import encode
+from src.machine import Machine
 
 
 def run_assembler(args: argparse.Namespace) -> None:
@@ -19,9 +20,24 @@ def run_assembler(args: argparse.Namespace) -> None:
     print(f"Ассемблировано команд: {len(instructions)}")
 
 
+def run_interpreter(args: argparse.Namespace) -> None:
+    """Выполняет бинарную программу и сохраняет JSON-дамп."""
+    machine = Machine(args.program.read_bytes())
+    machine.run()
+    cells = machine.dump_cells(args.start, args.end)
+    with args.dump.open("w", encoding="utf-8") as stream:
+        stream.write("{")
+        for address, value in cells:
+            separator = "\n" if address == args.start else ",\n"
+            stream.write(f'{separator}  "{address}": {value}')
+        stream.write("\n}\n")
+
+
 def create_parser() -> argparse.ArgumentParser:
     """Настраивает команды и параметры CLI."""
-    parser = argparse.ArgumentParser(description="Учебная виртуальная машина")
+    parser = argparse.ArgumentParser(
+        prog="run.sh", description="Учебная виртуальная машина"
+    )
     commands = parser.add_subparsers(dest="command", required=True)
 
     assembler = commands.add_parser("assemble", help="ассемблировать исходник")
@@ -31,6 +47,15 @@ def create_parser() -> argparse.ArgumentParser:
         "--test", action="store_true", help="показать байты команд"
     )
     assembler.set_defaults(handler=run_assembler)
+
+    interpreter = commands.add_parser("interpret", help="выполнить программу")
+    interpreter.add_argument(
+        "program", type=Path, help="путь к бинарному файлу"
+    )
+    interpreter.add_argument("dump", type=Path, help="путь к JSON-дампу")
+    interpreter.add_argument("start", type=int, help="первый адрес дампа")
+    interpreter.add_argument("end", type=int, help="последний адрес дампа")
+    interpreter.set_defaults(handler=run_interpreter)
     return parser
 
 

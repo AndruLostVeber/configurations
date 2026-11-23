@@ -2,7 +2,6 @@
 
 from dataclasses import dataclass
 
-
 LOAD = 9
 READ = 12
 WRITE = 10
@@ -10,6 +9,7 @@ SGN = 14
 REGISTER_BITS = 4
 REGISTER_COUNT = 1 << REGISTER_BITS
 ADDRESS_BITS = 32
+MAX_ADDRESS = (1 << ADDRESS_BITS) - 1
 OPCODE_BITS = 4
 INSTRUCTION_SIZE = 5
 
@@ -63,3 +63,26 @@ def encode(instruction: Instruction) -> bytes:
         word |= (value & mask) << shift
         shift += field.bits
     return word.to_bytes(INSTRUCTION_SIZE, byteorder="little")
+
+
+def decode(command: bytes) -> Instruction:
+    """Распаковывает одну команду, восстанавливая знак константы."""
+    if len(command) != INSTRUCTION_SIZE:
+        raise ValueError("неполная команда")
+    word = int.from_bytes(command, byteorder="little")
+    opcode = word & ((1 << OPCODE_BITS) - 1)
+    spec = FORMATS_BY_OPCODE.get(opcode)
+    if spec is None:
+        raise ValueError(f"неизвестный код операции {opcode}")
+
+    word >>= OPCODE_BITS
+    operands = []
+    for field in spec.operands:
+        modulus = 1 << field.bits
+        value = word & (modulus - 1)
+        sign_bit = modulus >> 1
+        if field.signed and value >= sign_bit:
+            value -= modulus
+        operands.append(value)
+        word >>= field.bits
+    return Instruction(opcode, tuple(operands))
