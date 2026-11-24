@@ -63,6 +63,12 @@ class MachineTests(unittest.TestCase):
             self.interpret_source(program, 256, 256), {"256": 0}
         )
 
+    def test_sign_operation(self):
+        self.assertEqual(
+            self.interpret_source(EXAMPLES / "sign.asm", 310, 312),
+            {"310": -1, "311": 0, "312": 1},
+        )
+
     def test_invalid_binary_and_memory_ranges(self):
         cases = (
             (b"\xa9", 0, 1, "неполная команда"),
@@ -72,6 +78,10 @@ class MachineTests(unittest.TestCase):
             (b"", 2, 1, "начальный адрес больше конечного"),
             (
                 bytes.fromhex("09ffffff00 0a00000000"), 0, 1,
+                "адрес -1 вне диапазона",
+            ),
+            (
+                bytes.fromhex("09ffffff00 0e00000000"), 0, 1,
                 "адрес -1 вне диапазона",
             ),
         )

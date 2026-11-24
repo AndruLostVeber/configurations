@@ -8,12 +8,13 @@ from src.isa import (
     MAX_ADDRESS,
     READ,
     REGISTER_COUNT,
+    SGN,
     WRITE,
     decode,
 )
 
 FIRST_ADDRESS = 0
-INITIAL_VALUE = 0
+ZERO = 0
 
 
 def validate_address(address: int) -> None:
@@ -30,11 +31,12 @@ class Machine:
             raise ValueError("неполная команда в конце бинарного файла")
         self._program_end = len(program)
         self._memory = dict(enumerate(program))
-        self._registers = [INITIAL_VALUE] * REGISTER_COUNT
+        self._registers = [ZERO] * REGISTER_COUNT
         self._operations = {
             LOAD: self._load,
             READ: self._read,
             WRITE: self._write,
+            SGN: self._sign,
         }
 
     def run(self) -> None:
@@ -43,11 +45,7 @@ class Machine:
         for address in addresses:
             try:
                 instruction = decode(self._fetch(address))
-                operation = self._operations.get(instruction.opcode)
-                if operation is None:
-                    raise ValueError(
-                        f"операция {instruction.opcode} недоступна на этапе 3.3"
-                    )
+                operation = self._operations[instruction.opcode]
                 operation(*instruction.operands)
             except ValueError as error:
                 raise ValueError(f"Адрес команды {address}: {error}") from error
@@ -63,13 +61,21 @@ class Machine:
 
     def _read(self, register: int, address: int) -> None:
         """Читает ячейку по абсолютному адресу в регистр."""
-        self._registers[register] = self._memory.get(address, INITIAL_VALUE)
+        self._registers[register] = self._memory.get(address, ZERO)
 
     def _write(self, register: int, offset: int, base: int) -> None:
         """Сохраняет регистр по адресу из базового регистра со смещением."""
         address = self._registers[base] + offset
         validate_address(address)
         self._memory[address] = self._registers[register]
+
+    def _sign(self, address_register: int, result_register: int) -> None:
+        """Вычисляет знак числа по адресу из первого регистра."""
+        address = self._registers[address_register]
+        validate_address(address)
+        value = self._memory.get(address, ZERO)
+        sign = int(value > ZERO) - int(value < ZERO)
+        self._registers[result_register] = sign
 
     def dump_cells(self, start: int, end: int) -> Iterator[tuple[int, int]]:
         """Возвращает адреса из включительного диапазона с их значениями."""
@@ -78,6 +84,6 @@ class Machine:
         if start > end:
             raise ValueError("начальный адрес больше конечного")
         return (
-            (address, self._memory.get(address, INITIAL_VALUE))
+            (address, self._memory.get(address, ZERO))
             for address in range(start, end + 1)
         )
