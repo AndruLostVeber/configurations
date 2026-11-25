@@ -69,6 +69,18 @@ class MachineTests(unittest.TestCase):
             {"310": -1, "311": 0, "312": 1},
         )
 
+    def test_sign_vectors_in_place(self):
+        cases = {
+            "vector-mixed.asm": [-1, 0, 1, -1, 1, 0, -1, 1, -1, 1],
+            "vector-nonnegative.asm": [0, 1, 1, 0, 1, 1, 0, 1, 1, 1],
+            "vector-nonpositive.asm": [-1, -1, 0, -1, -1, -1, 0, -1, -1, -1],
+        }
+        for filename, values in cases.items():
+            with self.subTest(example=filename):
+                dump = self.interpret_source(EXAMPLES / filename, 1023, 1034)
+                addresses = map(str, range(1023, 1035))
+                self.assertEqual(dump, dict(zip(addresses, [0, *values, 0])))
+
     def test_invalid_binary_and_memory_ranges(self):
         cases = (
             (b"\xa9", 0, 1, "неполная команда"),

@@ -12,6 +12,16 @@ SPECIFICATION = PROJECT / "examples" / "specification.asm"
 class AssemblerTests(unittest.TestCase):
     """Проверяет примеры спецификации и диагностику разбора."""
 
+    def test_launcher_uses_its_own_project(self):
+        with TemporaryDirectory() as directory:
+            other_source = Path(directory) / "src"
+            other_source.mkdir()
+            (other_source / "__init__.py").touch()
+            result = run_cli("--help", cwd=directory)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("assemble", result.stdout)
+
     def test_specification_bytes(self):
         with TemporaryDirectory() as directory:
             binary = Path(directory) / "out.bin"
